@@ -74,32 +74,24 @@ namespace damiao
         float TAU_MAX;
     }Limit_param;
 
-    typedef struct
-    {
-        struct
-        {
-            float kp;
-            float kd;
-            float q;
-            float dq;
-            float tau;
-        } cmd;
-
-        struct {
-            float q;
-            float dq;
-            float tau;
-            DM_Motor_Type Motor_Type;
-        } state;
-
-    } MotorParam;
-
     class Motor
     {
     private:
         /* data */
         Motor_id Master_id;
         Motor_id Slave_id;
+        float kp=0;
+        float kd=0;
+        float cmd_q=0;
+        float cmd_dq=0;
+        float cmd_tau=0;
+        float state_q=0;
+        float state_dq=0;
+        float state_tau=0;
+        Limit_param limit_param;
+        DM_Motor_Type Motor_Type;
+
+      
 
     public:
         Motor(DM_Motor_Type Motor_Type,Motor_id Slave_id,Motor_id Master_id)
@@ -117,9 +109,34 @@ namespace damiao
             this->Slave_id = Slave_id;
         }
 
-        Motor(/* args */);
+        Motor(){
+            this->Master_id = 0x01;
+            this->Slave_id = 0x00;
+            Limit_param limit_param[Num_Of_Motor]=
+            {
+                            { -12.5, 12.5, 30, 10 }, // DM4310
+                            { -12.5, 12.5, 30, 10 }, // DM4340
+                            { -12.5, 12.5, 30, 10 }, // DM6006
+                            { -12.5, 12.5, 30, 10 }  // DM8009
+            };
+            this->limit_param = limit_param[DM4310];
+        }
         ~Motor();
-        MILESTRO_DECLARE_NON_COPYABLE(Motor);
+         void recv_data(float q, float dq, float tau)
+        {
+            this->state_q = q;
+            this->state_dq = dq;
+            this->state_tau = tau;
+        }
+
+        void save_cmd(float cmd_kp, float cmd_kd, float q, float dq, float tau)
+        {
+            this->kp = cmd_kp;
+            this->kd = cmd_kd;
+            this->cmd_q = q;
+            this->cmd_dq = dq;
+            this->cmd_tau = tau;
+        }
         DM_Motor_Type GetMotorType() const
         {
             return this->Motor_Type;
@@ -134,11 +151,11 @@ namespace damiao
         {
             return this->Slave_id;
         }
-        float Get_q()
+        float Get_Position()
         {
             return this->state_q;
         }
-        float Get_dq()
+        float Get_Velocity()
         {
             return this->state_dq;
         }
@@ -146,46 +163,11 @@ namespace damiao
         {
             return this->state_tau;
         }
-
-
-        void recv_data(float q, float dq, float tau)
-        {
-            this->state_q = q;
-            this->state_dq = dq;
-            this->state_tau = tau;
-            std::cout<<q<<dq<<tau<<std::endl;
-        }
-
-        void save_cmd(float cmd_kp, float cmd_kd, float q, float dq, float tau)
-        {
-            this->kp = cmd_kp;
-            this->kd = cmd_kd;
-            this->cmd_q = q;
-            this->cmd_dq = dq;
-            this->cmd_tau = tau;
-        }
-
         Limit_param get_limit_param()
         {
             return limit_param;
         }
-        float kp=0;
-        float kd=0;
-        float cmd_q=0;
-        float cmd_dq=0;
-        float cmd_tau=0;
-        float state_q=0;
-        float state_dq=0;
-        float state_tau=0;
-        Limit_param limit_param;
-        DM_Motor_Type Motor_Type;
     };
-
-
-
-    Motor::Motor(/* args */)
-    {
-    }
 
     Motor::~Motor()
     {
@@ -211,26 +193,41 @@ namespace damiao
                 serial_ = std::make_shared<SerialPort>("/dev/ttyACM0", B921600);
             }
         }
+        ~Motor_Control()
+        {
+        }
 
+        /*
+        * @brief 使能电机
+        */
         void enable(const Motor& damiao)
         {
             control_cmd(damiao.GetSlaveId(), 0xFC);
         }
-        void reset(const Motor& damiao) {
+        /*
+        * @brief 关闭电机
+        * @param 电机对象
+        */
+        void shutdown(const Motor& damiao) {
             control_cmd(damiao.GetSlaveId(), 0xFD);
         }
+
+        /*
+        * @brief 保存位置零点
+        * @param 电机对象
+        */
         void zero_position(const Motor& damiao)
         {
             control_cmd(damiao.GetSlaveId(), 0xFE);
         }
 
-/* @description: 控制电机
-  *@param q: 位置
-  *@param dq: 速度
-  *@param tau: 扭矩
-  *@param kp: 比例系数
-  *@param kd: 微分系数
-*/
+        /* @description: 控制电机
+          *@param q: 位置
+          *@param dq: 速度
+          *@param tau: 扭矩
+          *@param kp: 比例系数
+          *@param kd: 微分系数
+        */
         void control(Motor &DM_Motor, float kp, float kd, float q, float dq, float tau)
         {
             // 位置、速度和扭矩采用线性映射的关系将浮点型数据转换成有符号的定点数据
@@ -245,10 +242,7 @@ namespace damiao
             {
                 throw std::runtime_error("Motor_Control id not found");
             }
-
             auto& m = motors[id];
-
-//            m->cmd = {kp, kd, q, dq, tau}; // 保存控制命令
             m->save_cmd(kp, kd, q, dq, tau);
             uint16_t kp_uint = float_to_uint(kp, 0, 500, 12);
             uint16_t kd_uint = float_to_uint(kd, 0, 5, 12);
@@ -302,9 +296,7 @@ namespace damiao
                 float recv_q = uint_to_float(q_uint, limit_param_recv.Q_MIN, limit_param_recv.Q_MAX, 16);
                 float recv_dq = uint_to_float(dq_uint, -limit_param_recv.DQ_MAX, limit_param_recv.DQ_MAX, 12);
                 float recv_tau = uint_to_float(tau_uint, -limit_param_recv.TAU_MAX, limit_param_recv.TAU_MAX, 12);
-                // std::cout << "recv_q: " << recv_q << " recv_dq: " << recv_dq << " recv_tau: " << recv_tau << std::endl;
-                // std::cout<<m.GetSlaveId()<<std::endl;
-                m->recv_data(1, 1, 1);
+                m->recv_data(recv_q, recv_dq, recv_tau);
                 return;
             }
             else if (recv_data.CMD == 0x01) // receive fail
@@ -324,20 +316,14 @@ namespace damiao
                 /* code */
             }
         }
-
-        std::unordered_map<Motor_id, Motor*> motors;
-
         /**
          * @brief 添加电机
-         *
-         * 实现不同的MOTOR_ID和MASTER_ID都指向同一个MotorParam
-         * 确保MOTOR_ID和MASTER_ID都未使用
+         * @param DM_Motor 电机对象地址
+         * 
          */
         void addMotor(Motor *DM_Motor)
         {
-
             motors.insert({DM_Motor->GetSlaveId(), DM_Motor});
-            // motors[DM_Motor.GetMasterId()] = motors[DM_Motor.GetSlaveId()];
             motors.insert({DM_Motor->GetMasterId(), DM_Motor});
         }
 
@@ -350,12 +336,12 @@ namespace damiao
             usleep(1000);
             recv();
         }
-
+        std::unordered_map<Motor_id, Motor*> motors;
         SerialPort::SharedPtr serial_;  //serial port
         CAN_Send_Fream send_data; //send data frame
         CAN_Recv_Fream recv_data;//receive data frame
     };
 
-}; // namespace damiao
+}; 
 
 #endif // DAMIAO_H

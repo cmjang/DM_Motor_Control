@@ -1,2 +1,2 @@
-# DM_Motor_Control
-达妙电机Linux下电机驱动，基于开源的再次魔改
+# DM_Linux_Drive
+达妙linux开源驱动-damiao linux open source driver
