@@ -10,13 +10,11 @@
     className(const className&) = delete;                                                                              \
     className& operator=(const className&) = delete;
 
-namespace damiao
-{
+namespace damiao {
 
 #pragma pack(1)
 #define Motor_id uint32_t
-    enum DM_Motor_Type
-    {
+    enum DM_Motor_Type {
         DM4310,
         DM4340,
         DM6006,
@@ -24,8 +22,7 @@ namespace damiao
         Num_Of_Motor
     };
 
-    typedef struct
-    {
+    typedef struct {
         uint8_t freamHeader;
         uint8_t CMD;// 命令 0x00: 心跳
         //     0x01: receive fail 0x11: receive success
@@ -38,70 +35,64 @@ namespace damiao
         uint8_t canRtr: 1; // 0: 数据帧 1: 远程帧
         uint32_t CANID; // 电机反馈的ID
         uint8_t canData[8];
-        uint8_t freamEnd; // 帧尾
-    } CAN_Recv_Fream;
+        uint8_t frameEnd; // 帧尾
+    } CAN_ReceiveFrame;
 
-    typedef struct
-    {
-        uint8_t freamHeader[2] = {0x55, 0xAA}; // 帧头
-        uint8_t freamLen = 0x1e; // 帧长
+    typedef struct CAN_Send_Frame {
+        uint8_t frameHeader[2] = {0x55, 0xAA}; // 帧头
+        uint8_t frameLen = 0x1e; // 帧长
         uint8_t CMD = 0x01; // 命令 1：转发CAN数据帧 2：PC与设备握手，设备反馈OK 3: 非反馈CAN转发，不反馈发送状态
         uint32_t sendTimes = 1; // 发送次数
         uint32_t timeInterval = 10; // 时间间隔
         uint8_t IDType = 0; // ID类型 0：标准帧 1：扩展帧
-        uint32_t CANID=0x01; // CAN ID 使用电机ID作为CAN ID
+        uint32_t CANID = 0x01; // CAN ID 使用电机ID作为CAN ID
         uint8_t frameType = 0; // 帧类型 0： 数据帧 1：远程帧
         uint8_t len = 0x08; // len
-        uint8_t idAcc=0;
-        uint8_t dataAcc=0;
-        uint8_t data[8]={0};
-        uint8_t crc=0; // 未解析，任意值
+        uint8_t idAcc = 0;
+        uint8_t dataAcc = 0;
+        uint8_t data[8] = {0};
+        uint8_t crc = 0; // 未解析，任意值
 
-        void modify(const Motor_id id, const uint8_t* send_data)
-        {
+        void modify(const Motor_id id, const uint8_t *send_data) {
             CANID = id;
-            std::copy(send_data, send_data+8, data);
+            std::copy(send_data, send_data + 8, data);
         }
-    } CAN_Send_Fream;
+    } CAN_Send_Frame;
 
 #pragma pack()
 
-    typedef struct
-    {
+    typedef struct {
         float Q_MIN;
         float Q_MAX;
         float DQ_MAX;
         float TAU_MAX;
-    }Limit_param;
+    } Limit_param;
 
-    class Motor
-    {
+    class Motor {
     private:
         /* data */
         Motor_id Master_id;
         Motor_id Slave_id;
-        float kp=0;
-        float kd=0;
-        float cmd_q=0;
-        float cmd_dq=0;
-        float cmd_tau=0;
-        float state_q=0;
-        float state_dq=0;
-        float state_tau=0;
-        Limit_param limit_param;
+        float kp = 0;
+        float kd = 0;
+        float cmd_q = 0;
+        float cmd_dq = 0;
+        float cmd_tau = 0;
+        float state_q = 0;
+        float state_dq = 0;
+        float state_tau = 0;
+        Limit_param limit_param{};
         DM_Motor_Type Motor_Type;
 
-      
 
     public:
-        Motor(DM_Motor_Type Motor_Type,Motor_id Slave_id,Motor_id Master_id)
-        {
-            Limit_param limit_param[Num_Of_Motor]=
+        Motor(DM_Motor_Type Motor_Type, Motor_id Slave_id, Motor_id Master_id) {
+            Limit_param limit_param[Num_Of_Motor] =
                     {
-                            { -12.5, 12.5, 30, 10 }, // DM4310
-                            { -12.5, 12.5, 30, 10 }, // DM4340
-                            { -12.5, 12.5, 30, 10 }, // DM6006
-                            { -12.5, 12.5, 30, 10 }  // DM8009
+                            {-12.5, 12.5, 30, 10}, // DM4310
+                            {-12.5, 12.5, 30, 10}, // DM4340
+                            {-12.5, 12.5, 30, 10}, // DM6006
+                            {-12.5, 12.5, 30, 10}  // DM8009
                     };
             this->limit_param = limit_param[Motor_Type];
             this->Motor_Type = Motor_Type;
@@ -109,69 +100,62 @@ namespace damiao
             this->Slave_id = Slave_id;
         }
 
-        Motor(){
+        Motor() {
             this->Master_id = 0x01;
             this->Slave_id = 0x00;
-            Limit_param limit_param[Num_Of_Motor]=
-            {
-                            { -12.5, 12.5, 30, 10 }, // DM4310
-                            { -12.5, 12.5, 30, 10 }, // DM4340
-                            { -12.5, 12.5, 30, 10 }, // DM6006
-                            { -12.5, 12.5, 30, 10 }  // DM8009
-            };
+            Limit_param limit_param[Num_Of_Motor] =
+                    {
+                            {-12.5, 12.5, 30, 10}, // DM4310
+                            {-12.5, 12.5, 30, 10}, // DM4340
+                            {-12.5, 12.5, 30, 10}, // DM6006
+                            {-12.5, 12.5, 30, 10}  // DM8009
+                    };
             this->limit_param = limit_param[DM4310];
         }
-        ~Motor();
-         void recv_data(float q, float dq, float tau)
-        {
+
+        void recv_data(float q, float dq, float tau) {
             this->state_q = q;
             this->state_dq = dq;
             this->state_tau = tau;
         }
 
-        void save_cmd(float cmd_kp, float cmd_kd, float q, float dq, float tau)
-        {
+        void save_cmd(float cmd_kp, float cmd_kd, float q, float dq, float tau) {
             this->kp = cmd_kp;
             this->kd = cmd_kd;
             this->cmd_q = q;
             this->cmd_dq = dq;
             this->cmd_tau = tau;
         }
-        DM_Motor_Type GetMotorType() const
-        {
+
+        DM_Motor_Type GetMotorType() const {
             return this->Motor_Type;
         }
 
-        Motor_id GetMasterId() const
-        {
+        Motor_id GetMasterId() const {
             return this->Master_id;
         }
 
-        Motor_id GetSlaveId() const
-        {
+        Motor_id GetSlaveId() const {
             return this->Slave_id;
         }
-        float Get_Position()
-        {
+
+        float Get_Position() const {
             return this->state_q;
         }
-        float Get_Velocity()
-        {
+
+        float Get_Velocity() const {
             return this->state_dq;
         }
-        float Get_tau()
-        {
+
+        float Get_tau() const {
             return this->state_tau;
         }
-        Limit_param get_limit_param()
-        {
+
+        Limit_param get_limit_param() {
             return limit_param;
         }
     };
 
-    Motor::~Motor()
-    {
-    }
 
 /**
  * @brief 达妙科技  电机控制
@@ -194,8 +178,7 @@ namespace damiao
             }
         }
         ~Motor_Control()
-        {
-        }
+        = default;
 
         /*
         * @brief 使能电机
@@ -262,15 +245,15 @@ namespace damiao
             data_buf[7] = tau_uint & 0xff;
 
             send_data.modify(id, data_buf.data());
-            serial_->send((uint8_t*)&send_data, sizeof(CAN_Send_Fream));
+            serial_->send((uint8_t*)&send_data, sizeof(CAN_Send_Frame));
             this->recv();
         }
 
         void recv()
         {
-            serial_->recv((uint8_t*)&recv_data, 0xAA, sizeof(CAN_Recv_Fream));
+            serial_->recv((uint8_t*)&recv_data, 0xAA, sizeof(CAN_ReceiveFrame));
 
-            if(recv_data.CMD == 0x11 && recv_data.freamEnd == 0x55) // receive success
+            if(recv_data.CMD == 0x11 && recv_data.frameEnd == 0x55) // receive success
             {
                 static auto uint_to_float = [](uint16_t x, float xmin, float xmax, uint8_t bits) -> float {
                     float span = xmax - xmin;
@@ -332,14 +315,14 @@ namespace damiao
         {
             std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, cmd};
             send_data.modify(id, data_buf.data());
-            serial_->send((uint8_t*)&send_data, sizeof(CAN_Send_Fream));
+            serial_->send((uint8_t*)&send_data, sizeof(CAN_Send_Frame));
             usleep(1000);
             recv();
         }
         std::unordered_map<Motor_id, Motor*> motors;
         SerialPort::SharedPtr serial_;  //serial port
-        CAN_Send_Fream send_data; //send data frame
-        CAN_Recv_Fream recv_data;//receive data frame
+        CAN_Send_Frame send_data; //send data frame
+        CAN_ReceiveFrame recv_data{};//receive data frame
     };
 
 }; 
