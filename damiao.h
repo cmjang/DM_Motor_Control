@@ -18,23 +18,31 @@ namespace damiao
 
 #pragma pack(1)
 #define Motor_id uint32_t
+
+    /*
+     * @brief 电机类型
+     */
     enum DM_Motor_Type
     {
         DM4310,
         DM4310_48V,
         DM4340,
+        DM4340_48V,
         DM6006,
         DM8006,
         DM8009,
         Num_Of_Motor
     };
 
+    /*
+     * @brief 电机控制模式
+     */
     enum Control_Mode
     {
         MIT_MODE=1,
         POS_VEL_MODE=2,
         VEL_MODE=3,
-        POS_FORCE_MOD0E=4,
+        POS_FORCE_MODE=4,
     };
 
     typedef struct
@@ -87,6 +95,17 @@ namespace damiao
         float TAU_MAX;
     }Limit_param;
 
+    Limit_param limit_param[Num_Of_Motor]=
+            {
+                    { -12.5, 12.5, 30, 10 }, // DM4310
+                    { -12.5, 12.5, 50, 10 }, // DM4310_48V
+                    { -12.5, 12.5, 8, 28 }, // DM4340
+                    { -12.5, 12.5, 10, 28 }, // DM4340_48V
+                    { -12.5, 12.5, 45, 20 }, // DM6006
+                    { -12.5, 12.5, 45, 40 }, // DM8006
+                    { -12.5, 12.5, 45, 54 }  // DM8009
+            };
+
     class Motor
     {
     private:
@@ -107,16 +126,17 @@ namespace damiao
       
 
     public:
+        /**
+         * @brief Construct a new Motor object
+         *
+         * @param Motor_Type 电机类型
+         * @param Slave_id CANID 从机ID即电机ID
+         * @param Master_id 主机ID建议主机ID不要都设为0x00
+         *
+         */
         Motor(DM_Motor_Type Motor_Type,Motor_id Slave_id,Motor_id Master_id)
         {
-            Limit_param limit_param[Num_Of_Motor]=
-                    {
-                            { -12.5, 12.5, 30, 10 }, // DM4310
-                            { -12.5, 12.5, 30, 10 }, // DM4340
-                            { -12.5, 12.5, 30, 10 }, // DM6006
-                            { -12.5, 12.5, 30, 10 }  // DM8009
-                    };
-            this->limit_param = limit_param[Motor_Type];
+            this->limit_param = damiao::limit_param[Motor_Type];
             this->Motor_Type = Motor_Type;
             this->Master_id = Master_id;
             this->Slave_id = Slave_id;
@@ -124,15 +144,8 @@ namespace damiao
 
         Motor(){
             this->Master_id = 0x01;
-            this->Slave_id = 0x00;
-            Limit_param limit_param[Num_Of_Motor]=
-            {
-                            { -12.5, 12.5, 30, 10 }, // DM4310
-                            { -12.5, 12.5, 30, 10 }, // DM4340
-                            { -12.5, 12.5, 30, 10 }, // DM6006
-                            { -12.5, 12.5, 30, 10 }  // DM8009
-            };
-            this->limit_param = limit_param[DM4310];
+            this->Slave_id = 0x11;
+            this->limit_param = damiao::limit_param[DM4310];
         }
         ~Motor();
          void recv_data(float q, float dq, float tau)
@@ -150,28 +163,49 @@ namespace damiao
             this->cmd_dq = dq;
             this->cmd_tau = tau;
         }
+        /*
+         * @brief 获取电机类型
+         */
         DM_Motor_Type GetMotorType() const
         {
             return this->Motor_Type;
         }
 
+        /*
+         * @brief 获取主机ID
+         */
         Motor_id GetMasterId() const
         {
             return this->Master_id;
         }
 
+        /*
+         * @brief 获取电机ID
+         */
         Motor_id GetSlaveId() const
         {
             return this->Slave_id;
         }
+
+        /*
+         * @brief 获取电机位置
+         */
+
         float Get_Position() const
         {
             return this->state_q;
         }
+        /*
+         * @brief 获取电机速度
+         */
         float Get_Velocity() const
         {
             return this->state_dq;
         }
+        /*
+         * @brief 获取电机实际输出扭矩
+         */
+
         float Get_tau() const
         {
             return this->state_tau;
@@ -196,7 +230,7 @@ namespace damiao
     public:
 
         /*
-        * @brief 构造函数
+        * @brief 定义电机控制对象
         * @param serial 串口对象
         */
         Motor_Control(SerialPort::SharedPtr serial = nullptr): serial_(std::move(serial))
@@ -234,7 +268,7 @@ namespace damiao
             control_cmd(damiao.GetSlaveId(), 0xFE);
         }
 
-        /* @description: 控制电机
+        /* @description: MIT Control Mode MIT控制模式
           *@param q: 位置
           *@param dq: 速度
           *@param tau: 扭矩
@@ -279,6 +313,12 @@ namespace damiao
             this->recv();
         }
 
+        /*
+         * @description: 位置速度控制模式
+         * @param pos: 位置
+         * @param vel: 速度
+         * @param DM_Motor: 电机对象
+         */
         void control_pos_vel(Motor &DM_Motor,float pos,float vel)
         {
             Motor_id id = DM_Motor.GetSlaveId();
@@ -305,6 +345,11 @@ namespace damiao
             this->recv();
         }
 
+        /*
+         * @description: 速度控制模式
+         * @param vel: 速度
+         * @param DM_Motor: 电机对象
+         */
         void control_vel(Motor &DM_Motor,float vel)
         {
             Motor_id id =DM_Motor.GetSlaveId();
@@ -330,6 +375,13 @@ namespace damiao
             this->recv();
         }
 
+        /*
+         * @description: 位置力矩混合控制模式
+         * @param pos: 位置 float
+         * @param vel: 速度 范围0-10000 具体参考达妙手册
+         * @param i: 电流 范围0-10000具体参考达妙手册
+         * @param DM_Motor: 电机对象
+         */
         void control_pos_force(Motor &DM_Motor,float pos, uint16_t vel, uint16_t i)
         {
             Motor_id id =DM_Motor.GetSlaveId();
@@ -441,12 +493,24 @@ namespace damiao
             serial_->send((uint8_t*)&send_data, sizeof(CAN_Send_Fream));
         }
 
+        /*
+         * @description: 切换控制模式
+         * @param DM_Motor: 电机对象
+         * @param mode: 控制模式
+         * damiao::MIT_MODE, damiao::POS_VEL_MODE, damiao::VEL_MODE, damiao::POS_FORCE_MODE
+         * 这几种模式
+         */
         void switchControlMode(Motor &DM_Motor,Control_Mode mode)
         {
             uint8_t write_data[4]={(uint8_t)mode, 0x00, 0x00, 0x00};
             write_motor_param(DM_Motor,10,write_data);
         }
 
+        /*
+         * @description: 保存电机参数
+         * @param DM_Motor: 电机对象
+         * 电机默认参数不会写到flash里面，需要进行写操作
+         */
         void save_motor_param(Motor &DM_Motor)
         {
             uint8_t id = DM_Motor.GetSlaveId();
