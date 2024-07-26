@@ -1,3 +1,0 @@
-D:\Jetbrains\CLion\bin\cmake\win\x64\bin\cmake.exe -E rm -f CMakeFiles\DM_Linux_Drive.dir/objects.a
-D:\msys2\mingw64\bin\ar.exe qc CMakeFiles\DM_Linux_Drive.dir/objects.a @CMakeFiles\DM_Linux_Drive.dir\objects1.rsp
-D:\msys2\mingw64\bin\g++.exe -g -Wl,--whole-archive CMakeFiles\DM_Linux_Drive.dir/objects.a -Wl,--no-whole-archive -o DM_Linux_Drive.exe -Wl,--out-implib,libDM_Linux_Drive.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles\DM_Linux_Drive.dir\linkLibs.rsp
