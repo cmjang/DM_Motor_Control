@@ -14,6 +14,8 @@
 #define POS_MODE 0x100
 #define SPEED_MODE 0x200
 #define POSI_MODE 0x300
+#define max_retries 20
+#define retry_interval 50000
 namespace damiao
 {
 #pragma pack(1)
@@ -33,6 +35,9 @@ namespace damiao
         DM8009,
         DM10010L,
         DM10010,
+        DMH3510,
+        DMH6215,
+        DMG6220,
         Num_Of_Motor
     };
 
@@ -160,7 +165,10 @@ namespace damiao
                     {12.5, 45, 40 }, // DM8006
                     {12.5, 45, 54 }, // DM8009
                     {12.5,25,  200}, // DM10010L
-                    {12.5,20, 200}  // DM10010
+                    {12.5,20, 200},  // DM10010
+                    {12.5,280,1},    // DMH3510
+                    {12.5,45,10},    // DMH6215
+                    {12.5,45,10}     // DMG6220
             };
 
     class Motor
@@ -336,7 +344,8 @@ namespace damiao
         void enable(const Motor& motor)
         {
             control_cmd(motor.GetSlaveId(), 0xFC);
-            usleep(10000);//10ms
+            usleep(100000);//100ms
+            this->receive();
         }
 
         /*
@@ -348,16 +357,32 @@ namespace damiao
         {
             uint32_t id = ((mode -1) << 2) + motor.GetSlaveId();
             control_cmd(id, 0xFC);
-            usleep(10000);
+            usleep(100000);
+            this->receive();
         }
 
+        /*
+         * @brief refresh motor status 刷新电机状态
+         * @param motor object 电机对象
+         */
+        void refresh_motor_status(const Motor& motor)
+        {
+            uint32_t id = 0x7FF;
+            uint8_t can_low = motor.GetSlaveId() & 0xff; // id low 8 bit
+            uint8_t can_high = (motor.GetSlaveId() >> 8) & 0xff; //id high 8 bit
+            std::array<uint8_t, 8> data_buf = {can_low,can_high, 0xCC, 0x00, 0x00, 0x00, 0x00, 0x00};
+            send_data.modify(id, data_buf.data());
+            serial_->send((uint8_t*)&send_data, sizeof(can_send_frame));
+            this->receive();
+        }
         /*
         * @brief  disable the motor 失能电机
         * @param  motor object 电机对象
         */
         void disable(const Motor& motor) {
             control_cmd(motor.GetSlaveId(), 0xFD);
-            usleep(10000);
+            usleep(100000);
+            this->receive();
         }
 
         /*
@@ -367,8 +392,8 @@ namespace damiao
         void set_zero_position(const Motor& motor)
         {
             control_cmd(motor.GetSlaveId(), 0xFE);
-            usleep(10000);
-
+            usleep(100000);
+            this->receive();
         }
 
         /* @description: MIT Control Mode MIT控制模式 具体描述请参考达妙手册
@@ -502,18 +527,34 @@ namespace damiao
                 uint16_t q_uint = (uint16_t(data[1]) << 8) | data[2];
                 uint16_t dq_uint = (uint16_t(data[3]) << 4) | (data[4] >> 4);
                 uint16_t tau_uint = (uint16_t(data[4] & 0xf) << 8) | data[5];
-
-                if(motors.find(receive_data.canId) == motors.end())
+                if(receive_data.canId != 0x00)   //make sure the motor id is not 0x00
                 {
-                    return;
-                }
+                    if(motors.find(receive_data.canId) == motors.end())
+                    {
+                        return;
+                    }
 
-                auto m = motors[receive_data.canId];
-                Limit_param limit_param_receive = m->get_limit_param();
-                float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX, limit_param_receive.Q_MAX, 16);
-                float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX, limit_param_receive.DQ_MAX, 12);
-                float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX, limit_param_receive.TAU_MAX, 12);
-                m->receive_data(receive_q, receive_dq, receive_tau);
+                    auto m = motors[receive_data.canId];
+                    Limit_param limit_param_receive = m->get_limit_param();
+                    float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX, limit_param_receive.Q_MAX, 16);
+                    float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX, limit_param_receive.DQ_MAX, 12);
+                    float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX, limit_param_receive.TAU_MAX, 12);
+                    m->receive_data(receive_q, receive_dq, receive_tau);
+                }
+                else //why the user set the masterid as 0x00 ???
+                {
+                    uint32_t slaveID = data[0] & 0x0f;
+                    if(motors.find(slaveID) == motors.end())
+                    {
+                        return;
+                    }
+                    auto m = motors[slaveID];
+                    Limit_param limit_param_receive = m->get_limit_param();
+                    float receive_q = uint_to_float(q_uint, -limit_param_receive.Q_MAX, limit_param_receive.Q_MAX, 16);
+                    float receive_dq = uint_to_float(dq_uint, -limit_param_receive.DQ_MAX, limit_param_receive.DQ_MAX, 12);
+                    float receive_tau = uint_to_float(tau_uint, -limit_param_receive.TAU_MAX, limit_param_receive.TAU_MAX, 12);
+                    m->receive_data(receive_q, receive_dq, receive_tau);
+                }
                 return;
             }
             else if (receive_data.CMD == 0x01) // receive fail
@@ -561,7 +602,7 @@ namespace damiao
                         motors[slaveID]->set_param(RID, data_float);
                     }
                 }
-                return;
+                return ;
             }
         }
 
@@ -592,14 +633,10 @@ namespace damiao
             std::array<uint8_t, 8> data_buf{can_low, can_high, 0x33, RID, 0x00, 0x00, 0x00, 0x00};
             send_data.modify(0x7FF, data_buf.data());
             serial_->send((uint8_t*)&send_data, sizeof(can_send_frame));
-            usleep(10000);//10ms
-            receive_param();
-            if (motors.find(DM_Motor.GetSlaveId()) == motors.end())
+            for(uint8_t i =0;i<max_retries;i++)
             {
-                return 0;
-            }
-            else
-            {
+                usleep(retry_interval);
+                receive_param();
                 if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID))
                 {
                     if (is_in_ranges(RID))
@@ -611,11 +648,9 @@ namespace damiao
                         return motors[DM_Motor.GetSlaveId()]->get_param_as_float(RID);
                     }
                 }
-                else
-                {
-                    return 0;
-                }
             }
+
+            return 0;
         }
 
 
@@ -629,23 +664,20 @@ namespace damiao
             uint8_t write_data[4]={(uint8_t)mode, 0x00, 0x00, 0x00};
             uint8_t RID = 10;
             write_motor_param(DM_Motor,RID,write_data);
-            receive_param();
-            usleep(10000);//10ms
             if (motors.find(DM_Motor.GetSlaveId()) == motors.end())
             {
                 return false;
             }
-            else
+            for(uint8_t i =0;i<max_retries;i++)
             {
+                usleep(retry_interval);
+                receive_param();
                 if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID))
                 {
                     return motors[DM_Motor.GetSlaveId()]->get_param_as_uint32(RID) == mode;
                 }
-                else
-                {
-                    return false;
-                }
             }
+            return false;
         }
 
         /*
@@ -671,14 +703,14 @@ namespace damiao
                 data_uint8=(uint8_t*)&data;
                 write_motor_param(DM_Motor,RID,data_uint8);
             }
-            usleep(10000);//10ms
-            receive_param();
             if (motors.find(DM_Motor.GetSlaveId()) == motors.end())
             {
                 return false;
             }
-            else
+            for(uint8_t i =0;i<max_retries;i++)
             {
+                usleep(retry_interval);
+                receive_param();
                 if (motors[DM_Motor.GetSlaveId()]->is_have_param(RID))
                 {
                     if (is_in_ranges(RID))
@@ -690,13 +722,8 @@ namespace damiao
                         return fabsf(motors[DM_Motor.GetSlaveId()]->get_param_as_float(RID) - data)<0.1f;
                     }
                 }
-                else
-                {
-                    return false;
-                }
             }
-
-
+            return false;
         }
 
 
@@ -745,8 +772,6 @@ namespace damiao
             std::array<uint8_t, 8> data_buf = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, cmd};
             send_data.modify(id, data_buf.data());
             serial_->send((uint8_t*)&send_data, sizeof(can_send_frame));
-            usleep(1000);
-            receive();
         }
 
         void write_motor_param(Motor &DM_Motor,uint8_t RID,const uint8_t data[4])
